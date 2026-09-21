@@ -136,9 +136,9 @@ with f1:
     else:
         d_from = d_to = dr if not isinstance(dr, (list, tuple)) else dr[0]
 with f2:
-    regs = st.multiselect("Vehicle reg", sorted(flagged_all["Vehicle"].unique()))
+    regs = st.multiselect("Vehicle reg", sorted(flagged_all["Vehicle"].dropna().astype(str).unique().tolist()))
 with f3:
-    drvs = st.multiselect("Driver", sorted(flagged_all["Driver"].unique()))
+    drvs = st.multiselect("Driver", sorted(flagged_all["Driver"].dropna().astype(str).unique().tolist()))
 
 fl = flagged_all[(flagged_all["day"] >= d_from) & (flagged_all["day"] <= d_to)]
 if regs:
