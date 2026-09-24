@@ -52,6 +52,8 @@ def build_flagged(df: pd.DataFrame, window_min: int = 15):
     d["Alert #"] = d.groupby("Driver")["New alert"].cumsum()
     d["day"] = d["dt"].dt.date
     d["Over limit (mph)"] = (d["Speed"] - d["Speed Limit"]).astype(int)
+    d["_band_low"] = (d["Speed"] // 5 * 5).astype(int)
+    d["Speed band"] = d["_band_low"].astype(str) + "-" + (d["_band_low"] + 5).astype(str) + " mph"
 
     meta = {"date_from": d["day"].min(), "date_to": d["day"].max()}
     return d, meta
@@ -177,6 +179,45 @@ with tab_overview:
     st.download_button("⬇️ Download summary (Excel)", to_excel(summary, fl),
                        file_name=f"Driver_Speeding_Summary_{d_from:%d-%m}_{d_to:%d-%m}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # ---------------- Warning list + speed brackets ----------------
+    st.divider()
+    st.subheader("⚠️ Drivers to warn")
+    warn_n = st.number_input("Warn drivers with MORE THAN this many real alerts in the window", 1, 100, 7)
+    warned = summary[summary["Real Alerts"] > warn_n].copy()
+    st.metric("Drivers over the limit", len(warned))
+
+    if warned.empty:
+        st.success(f"No driver exceeded {warn_n} real alerts in this window.")
+    else:
+        wcols = ["S/No", "Driver", "Vehicle Reg", "Speeding events", "Real Alerts"]
+        st.dataframe(warned[wcols], use_container_width=True, hide_index=True)
+        st.download_button("⬇️ Download warning list (Excel)",
+                           to_excel(warned, fl[fl["Driver"].isin(warned["Driver"])]),
+                           file_name="Drivers_to_warn.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        wf = fl[fl["Driver"].isin(warned["Driver"])]
+        warned_top = warned.nlargest(20, "Real Alerts")
+        wf_top = fl[fl["Driver"].isin(warned_top["Driver"])]
+        st.markdown("**How far into speeding these drivers go** — events by 5 mph speed band (top 20 most-warned)")
+        band_ct = wf_top.groupby(["Driver", "Speed band", "_band_low"]).size().reset_index(name="Events")
+        bar = (alt.Chart(band_ct).mark_bar()
+               .encode(x=alt.X("Events:Q", stack="zero", title="Speeding events"),
+                       y=alt.Y("Driver:N", sort=warned_top["Driver"].tolist(), title=None),
+                       color=alt.Color("Speed band:N", sort=alt.SortField("_band_low"),
+                                       scale=alt.Scale(scheme="yelloworangered"), title="Speed band"),
+                       order=alt.Order("_band_low:Q"),
+                       tooltip=["Driver", "Speed band", "Events"])
+               .properties(height=max(220, 34 * len(warned_top))))
+        st.altair_chart(bar, use_container_width=True)
+
+        st.markdown("**Bracket breakdown (events per driver)**")
+        order_bands = [f"{lo}-{lo+5} mph" for lo in sorted(wf["_band_low"].unique())]
+        pivot = (wf.groupby(["Driver", "Speed band"]).size().unstack(fill_value=0)
+                 .reindex(columns=order_bands, fill_value=0))
+        pivot = pivot.reindex(warned["Driver"]).reset_index()
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
 
 # ---------------- Driver drill-down ----------------
 with tab_drill:
